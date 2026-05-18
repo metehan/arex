@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+      AREX_URL: http://127.0.0.1:2480
+      AREX_USER: root
+      AREX_PWD: playwithdata
+      AREX_DB: Imported
+    services:
+      arcadedb:
+        image: arcadedata/arcadedb:latest
+        ports:
+          - 2480:2480
+          - 2424:2424
+        env:
+          JAVA_OPTS: >-
+            -Darcadedb.server.rootPassword=playwithdata
+            -Darcadedb.server.defaultDatabases=Imported[root]{import:https://github.com/ArcadeData/arcadedb-datasets/raw/main/orientdb/OpenBeer.gz}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1.24.0
+        with:
+          elixir-version: '1.18.4'
+          otp-version: '27.3.3'
+          version-type: strict
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Wait for ArcadeDB
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS -u "$AREX_USER:$AREX_PWD" "$AREX_URL/api/v1/server" >/dev/null; then
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "ArcadeDB did not become ready in time" >&2
+          exit 1
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Build docs
+        run: mix docs
+
+      - name: Run tests with coverage
+        run: mix test --cover
