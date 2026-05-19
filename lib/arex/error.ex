@@ -154,19 +154,6 @@ defmodule Arex.Error do
     }
   end
 
-  @doc "Returns an error indicating that a transaction was required."
-  def transaction_required(message, request, details \\ nil) do
-    %{
-      kind: :transaction_required,
-      message: message,
-      status: nil,
-      arcade_code: nil,
-      details: details,
-      body: %{},
-      request: request
-    }
-  end
-
   @doc "Returns an error indicating that call options were invalid."
   def bad_opts(message, request, details \\ nil) do
     %{

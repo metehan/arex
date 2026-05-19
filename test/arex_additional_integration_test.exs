@@ -201,6 +201,15 @@ defmodule Arex.AdditionalIntegrationTest do
                scope: "ops"
              )
 
+    assert {:ok, [_]} =
+             Arex.TimeSeries.insert_many(
+               type,
+               [%{"ts" => 1_715_000_003_000, "sensor" => "load", "value" => 3.5}],
+               db: db,
+               tenant: "ankara",
+               scope: "ops"
+             )
+
     assert {:ok, rows} =
              Arex.TimeSeries.query_sql(
                "select from #{type} where sensor = :sensor order by ts",
@@ -210,10 +219,13 @@ defmodule Arex.AdditionalIntegrationTest do
                scope: "ops"
              )
 
-    assert length(rows) == 1
+    assert length(rows) == 2
     assert hd(rows)["tenant"] == "ankara"
     assert hd(rows)["scope"] == "ops"
     assert hd(rows)["value"] == 1.5
+    assert List.last(rows)["tenant"] == "ankara"
+    assert List.last(rows)["scope"] == "ops"
+    assert List.last(rows)["value"] == 3.5
   end
 
   test "record helpers cover persist_new, property mutation, and vaporize", %{db: db} do

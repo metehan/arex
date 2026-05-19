@@ -168,8 +168,9 @@ defmodule Arex.TimeSeries do
 
   def insert_many(type, rows, opts) when is_list(rows) do
     with {:ok, type} <- Sql.validate_identifier(type),
-         {:ok, script} <- build_insert_script(type, rows),
-         {:ok, %{records: records}} <- Command.sqlscript(script, %{}, opts) do
+         {:ok, resolved} <- Options.resolve(opts),
+         {:ok, script} <- build_insert_script(type, rows, resolved),
+         {:ok, %{records: records}} <- Command.sqlscript(script, %{}, resolved) do
       {:ok, parse_batch_rows(records)}
     end
   end
@@ -181,6 +182,7 @@ defmodule Arex.TimeSeries do
   @doc "Writes InfluxDB line protocol samples to `/api/v1/ts/:db/write`."
   def write_lines(lines, opts \\ []) do
     with {:ok, payload} <- normalize_lines(lines, opts),
+         {:ok, precision_query} <- precision_query(opts),
          {:ok, resolved, db} <- resolve_db(opts, "/api/v1/ts/:db/write") do
       Http.request(
         :post,
@@ -194,7 +196,7 @@ defmodule Arex.TimeSeries do
           body_mode: :raw,
           content_type: "text/plain",
           accept: "application/json",
-          query: precision_query(opts),
+          query: precision_query,
           response: :decoded
         )
       )
@@ -339,15 +341,14 @@ defmodule Arex.TimeSeries do
   end
 
   defp build_timestamp_clause(timestamp, opts) do
-    with {:ok, timestamp_name} <- normalize_timestamp_name(timestamp) do
-      precision = Keyword.get(opts, :precision)
-
+    with {:ok, timestamp_name} <- normalize_timestamp_name(timestamp),
+         {:ok, precision} <- timestamp_precision(Keyword.get(opts, :precision)) do
       {:ok,
        Enum.reject(
          [
            "timestamp",
            timestamp_name,
-           precision && ["precision", normalize_keywordish(precision)]
+           precision && ["precision", precision]
          ],
          &is_nil/1
        )
@@ -472,7 +473,24 @@ defmodule Arex.TimeSeries do
   defp normalize_keywordish(value) when is_binary(value), do: value
   defp normalize_keywordish(value), do: to_string(value)
 
-  defp build_insert_script(type, rows) do
+  defp timestamp_precision(nil), do: {:ok, nil}
+
+  defp timestamp_precision(value) do
+    case value |> normalize_keywordish() |> String.upcase() do
+      precision when precision in ["SECOND", "MILLISECOND", "MICROSECOND", "NANOSECOND"] ->
+        {:ok, precision}
+
+      _other ->
+        {:error,
+         Error.bad_opts(
+           "precision must be SECOND, MILLISECOND, MICROSECOND, or NANOSECOND",
+           %{method: nil, path: nil},
+           %{key: :precision}
+         )}
+    end
+  end
+
+  defp build_insert_script(type, rows, resolved) do
     if rows == [] do
       {:error, Error.bad_opts("rows must be a non-empty list", %{method: nil, path: nil})}
     else
@@ -482,6 +500,7 @@ defmodule Arex.TimeSeries do
         case Sql.normalize_map(row) do
           {:ok, attrs} ->
             return_var = "item#{index}"
+            attrs = Sql.stamp_boundaries(attrs, resolved)
 
             {:cont,
              {:ok,
@@ -538,8 +557,32 @@ defmodule Arex.TimeSeries do
 
   defp precision_query(opts) do
     case Keyword.get(opts, :precision) do
-      nil -> []
-      value -> [precision: normalize_keywordish(value) |> String.downcase()]
+      nil -> {:ok, []}
+      value -> write_precision(value)
+    end
+  end
+
+  defp write_precision(value) do
+    case value |> normalize_keywordish() |> String.downcase() do
+      value when value in ["ns", "nanosecond", "nanoseconds"] ->
+        {:ok, [precision: "ns"]}
+
+      value when value in ["us", "microsecond", "microseconds"] ->
+        {:ok, [precision: "us"]}
+
+      value when value in ["ms", "millisecond", "milliseconds"] ->
+        {:ok, [precision: "ms"]}
+
+      value when value in ["s", "second", "seconds"] ->
+        {:ok, [precision: "s"]}
+
+      _other ->
+        {:error,
+         Error.bad_opts(
+           "precision must be ns, us, ms, or s",
+           %{method: nil, path: nil},
+           %{key: :precision}
+         )}
     end
   end
 

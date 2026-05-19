@@ -25,7 +25,8 @@ defmodule Arex.KV do
   alias Arex.Options
   alias Arex.Sql
 
-  @index_target_regex ~r/^[A-Za-z][A-Za-z0-9_]*\[([A-Za-z][A-Za-z0-9_]*)\]$/
+  @index_target_regex ~r/^[A-Za-z][A-Za-z0-9_]*\[([A-Za-z][A-Za-z0-9_]*(?:,[A-Za-z][A-Za-z0-9_]*)*)\]$/
+  @target_regex ~r/^[A-Za-z][A-Za-z0-9_]*(\[[A-Za-z][A-Za-z0-9_]*(?:,[A-Za-z][A-Za-z0-9_]*)*\])?$/
 
   @doc "Executes a raw Redis-language command and returns the normalized command result."
   def run(command, opts \\ []) when is_binary(command) do
@@ -181,7 +182,8 @@ defmodule Arex.KV do
   defp scoped_lookup_key({target, opts}, key), do: scoped_lookup_key(target, key, opts)
 
   defp scoped_lookup_key(target, key, opts) do
-    with {:ok, boundary} <- boundary(opts) do
+    with {:ok, boundary} <- boundary(opts),
+         :ok <- reject_composite_boundary(target, boundary) do
       case index_lookup_field(target) do
         nil -> {:ok, stringify_key(key)}
         _field -> {:ok, namespace_key(stringify_key(key), boundary)}
@@ -191,7 +193,8 @@ defmodule Arex.KV do
 
   defp scope_hash_payload(target, payload, opts) when is_map(payload) do
     with {:ok, attrs} <- Sql.normalize_map(payload),
-         {:ok, boundary} <- boundary(opts) do
+         {:ok, boundary} <- boundary(opts),
+         :ok <- reject_composite_boundary(target, boundary) do
       attrs = Sql.stamp_boundaries(attrs, boundary)
 
       {:ok,
@@ -256,14 +259,44 @@ defmodule Arex.KV do
     |> to_string()
     |> case do
       "" -> {:error, Error.bad_opts("target cannot be empty", %{method: nil, path: nil})}
-      value -> {:ok, value}
+      value -> validate_target(value)
+    end
+  end
+
+  defp validate_target(target) do
+    if Regex.match?(@target_regex, target) do
+      {:ok, target}
+    else
+      {:error, Error.invalid_identifier(target, %{method: nil, path: nil})}
     end
   end
 
   defp index_lookup_field(target) do
-    case Regex.run(@index_target_regex, target, capture: :all_but_first) do
+    case index_lookup_fields(target) do
       [field] -> field
-      _other -> nil
+      _fields -> nil
+    end
+  end
+
+  defp index_lookup_fields(target) do
+    case Regex.run(@index_target_regex, target, capture: :all_but_first) do
+      [fields] -> String.split(fields, ",")
+      _other -> []
+    end
+  end
+
+  defp reject_composite_boundary(_target, %{tenant: nil, scope: nil}), do: :ok
+
+  defp reject_composite_boundary(target, _boundary) do
+    if length(index_lookup_fields(target)) > 1 do
+      {:error,
+       Error.bad_opts(
+         "boundary-aware composite KV targets are not supported by wrapped helpers",
+         %{method: :post, path: "/api/v1/command/:db"},
+         %{target: target}
+       )}
+    else
+      :ok
     end
   end
 

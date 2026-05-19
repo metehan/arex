@@ -52,9 +52,6 @@ defmodule Arex.Options do
          {:ok, scope} <- normalize_optional_string(Keyword.get(call_opts, :scope), :scope),
          :ok <- validate_scope_and_tenant(tenant, scope),
          {:ok, type} <- normalize_optional_string(Keyword.get(call_opts, :type), :type),
-         {:ok, transaction} <- normalize_transaction(Keyword.get(call_opts, :transaction, :auto)),
-         {:ok, transaction_timeout} <-
-           normalize_timeout(Keyword.get(call_opts, :transaction_timeout), :transaction_timeout),
          {:ok, receive_timeout} <-
            normalize_timeout(Keyword.get(call_opts, :receive_timeout), :receive_timeout),
          {:ok, retry} <- normalize_retry(Keyword.get(call_opts, :retry, false)),
@@ -70,8 +67,6 @@ defmodule Arex.Options do
          type: type,
          tenant: tenant,
          scope: scope,
-         transaction: transaction,
-         transaction_timeout: transaction_timeout,
          receive_timeout: receive_timeout,
          retry: retry,
          headers: headers,
@@ -133,18 +128,6 @@ defmodule Arex.Options do
     do: {:error, Error.scope_without_tenant(%{method: nil, path: nil})}
 
   defp validate_scope_and_tenant(_tenant, _scope), do: :ok
-
-  defp normalize_transaction(:auto), do: {:ok, :auto}
-  defp normalize_transaction(:required), do: {:ok, :required}
-  defp normalize_transaction(false), do: {:ok, false}
-
-  defp normalize_transaction(_value) do
-    {:error,
-     Error.bad_opts(
-       "transaction must be :auto, :required, or false",
-       %{method: nil, path: nil}
-     )}
-  end
 
   defp normalize_timeout(nil, _key), do: {:ok, nil}
   defp normalize_timeout(value, _key) when is_integer(value) and value > 0, do: {:ok, value}

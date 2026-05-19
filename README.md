@@ -84,7 +84,6 @@ Common call options:
 - `tenant` and `scope` define the application boundary for boundary-aware helpers.
 - `receive_timeout` sets the HTTP receive timeout in milliseconds.
 - `retry` enables read retries with a value such as `[max: 3, backoff_ms: 200]`.
-- `transaction` and `transaction_timeout` tune write helpers that need transactional behavior.
 - `headers` merges extra request headers without allowing callers to override auth headers.
 - `req_options` merges sanitized Req options after Arex strips retry settings that would bypass helper policy.
 

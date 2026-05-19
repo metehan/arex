@@ -25,15 +25,13 @@ This means you can keep stable connection defaults in config while overriding th
 | `language`            | query or command language, defaulting to `sql`                  |
 | `receive_timeout`     | HTTP receive timeout in milliseconds                            |
 | `retry`               | read retry policy such as `[max: 3, backoff_ms: 200]`           |
-| `transaction`         | write transaction mode, one of `:auto`, `:required`, or `false` |
-| `transaction_timeout` | positive integer timeout for transactional helpers              |
 | `headers`             | extra request headers, merged without overriding auth           |
 | `req_options`         | sanitized Req options merged into the request                   |
 
 Validation rules worth remembering:
 
 - `scope` requires `tenant`
-- `receive_timeout` and `transaction_timeout` must be positive integers when present
+- `receive_timeout` must be a positive integer when present
 - `retry` must be `false` or a keyword list with non-negative `max` and `backoff_ms`
 - `headers` must be a map or keyword list
 - `req_options` must be a map or keyword list
@@ -91,7 +89,6 @@ Common `kind` values:
 - `:scope_without_tenant`
 - `:invalid_identifier`
 - `:multiple_results`
-- `:transaction_required`
 - `:bad_opts`
 - `:not_found`
 

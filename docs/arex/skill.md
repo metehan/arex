@@ -31,7 +31,6 @@ Arex is an ArcadeDB-native Elixir client that wraps the HTTP API with higher-lev
 - `language` is not env-backed. It comes from call opts or app config and otherwise defaults to `"sql"`.
 - `receive_timeout` defaults to 60 seconds when omitted.
 - `retry` is disabled by default and is only supported on read helpers.
-- `transaction_timeout` is a call-local write option, not config or env state.
 - `scope` requires `tenant`.
 
 ## Core Modules

@@ -1,7 +1,6 @@
 defmodule Arex.UnitTest do
   use ExUnit.Case, async: false
 
-  alias Arex.Command
   alias Arex.Database
   alias Arex.Edge
   alias Arex.Error
@@ -97,9 +96,6 @@ defmodule Arex.UnitTest do
     assert %{kind: :multiple_results, details: %{limit: 2}} =
              Error.multiple_results("too many", request, %{limit: 2})
 
-    assert %{kind: :transaction_required, details: %{mode: :required}} =
-             Error.transaction_required("transaction needed", request, %{mode: :required})
-
     assert %{kind: :bad_opts, details: %{key: :tenant}} =
              Error.bad_opts("bad option", request, %{key: :tenant})
 
@@ -120,8 +116,6 @@ defmodule Arex.UnitTest do
                tenant: :ankara,
                scope: "crm",
                type: :Customer,
-               transaction: :required,
-               transaction_timeout: 2_000,
                receive_timeout: 7_500,
                retry: [max: 2, backoff_ms: 10],
                headers: [x_trace_id: 123, authorization: "ignore-me"],
@@ -136,8 +130,6 @@ defmodule Arex.UnitTest do
     assert resolved.type == "Customer"
     assert resolved.tenant == "ankara"
     assert resolved.scope == "crm"
-    assert resolved.transaction == :required
-    assert resolved.transaction_timeout == 2_000
     assert resolved.receive_timeout == 7_500
     assert resolved.retry == [max: 2, backoff_ms: 10]
     assert resolved.headers == %{"x-trace-id" => "123"}
@@ -160,9 +152,6 @@ defmodule Arex.UnitTest do
 
     assert {:error, %{kind: :scope_without_tenant}} =
              Options.resolve(scope: "crm")
-
-    assert {:error, %{kind: :bad_opts, message: "transaction must be :auto, :required, or false"}} =
-             Options.resolve(transaction: :sometimes)
 
     assert {:error, %{kind: :bad_opts, message: "receive_timeout must be a positive integer"}} =
              Options.resolve(receive_timeout: 0)
@@ -311,10 +300,6 @@ defmodule Arex.UnitTest do
             %{kind: :bad_opts, message: "limit must be positive and offset must be non-negative"}} =
              Query.stream_pages("select 1", %{}, offset: -1)
 
-    assert {:error,
-            %{kind: :bad_opts, message: "chunk_size is not supported on raw command helpers"}} =
-             Command.sql("select 1", %{}, %{chunk_size: 100})
-
     assert {:error, %{kind: :invalid_identifier}} = Database.create("bad-name")
     assert {:error, %{kind: :invalid_identifier}} = Database.drop("bad-name")
     assert {:error, %{kind: :invalid_identifier}} = Database.exists?("bad-name")
@@ -340,11 +325,7 @@ defmodule Arex.UnitTest do
   test "record helper validations fail before network when data is invalid" do
     opts = fake_connection_opts()
 
-    assert {:error, %{kind: :bad_opts, message: "chunk_size is not supported"}} =
-             Record.persist(%{"@type" => "Customer"}, opts ++ [chunk_size: 10])
-
-    assert {:error, %{kind: :bad_opts, message: "chunk_size is not supported"}} =
-             Record.persist_multi([], opts ++ [chunk_size: 10])
+    assert {:ok, []} = Record.persist_multi([], opts)
 
     assert {:error, %{kind: :bad_opts}} = Record.update_property("#12:0", :tenant, "izmir", opts)
     assert {:error, %{kind: :bad_opts}} = Record.merge("#12:0", %{"tenant" => "ankara"}, opts)
@@ -406,6 +387,26 @@ defmodule Arex.UnitTest do
 
     assert {:error, %{kind: :bad_opts, message: "keys must be a non-empty list"}} =
              KV.hmget("Account[id]", [], fake_connection_opts())
+
+    assert {:error, %{kind: :invalid_identifier}} =
+             KV.hget("Account[id] extra", "cust-1", fake_connection_opts())
+
+    assert {:error, %{kind: :invalid_identifier}} =
+             KV.hset("bad-target", %{"id" => "cust-1"}, fake_connection_opts())
+
+    assert {:error, %{kind: :database_required}} =
+             KV.hget("Account[firstName,lastName]", ~s(["Jay","Miner"]), [])
+
+    assert {:error,
+            %{
+              kind: :bad_opts,
+              message: "boundary-aware composite KV targets are not supported by wrapped helpers"
+            }} =
+             KV.hget(
+               "Account[firstName,lastName]",
+               ~s(["Jay","Miner"]),
+               fake_connection_opts() ++ [tenant: "ankara"]
+             )
   end
 
   test "time series helpers validate ddl and endpoint arguments before network" do
@@ -419,6 +420,19 @@ defmodule Arex.UnitTest do
 
     assert {:error, %{kind: :bad_opts, message: "fields must be a non-empty list"}} =
              TimeSeries.create_type("Metric", "ts", [], [], opts)
+
+    assert {:error,
+            %{
+              kind: :bad_opts,
+              message: "precision must be SECOND, MILLISECOND, MICROSECOND, or NANOSECOND"
+            }} =
+             TimeSeries.create_type(
+               "Metric",
+               "ts",
+               [],
+               [{"value", :double}],
+               opts ++ [precision: :minute]
+             )
 
     assert {:error, %{kind: :bad_opts, message: "rows must be a non-empty list"}} =
              TimeSeries.insert_many("Metric", [], opts)
@@ -440,6 +454,9 @@ defmodule Arex.UnitTest do
 
     assert {:error, %{kind: :bad_opts, message: "lines must be a string or list of strings"}} =
              TimeSeries.write_lines(123, opts)
+
+    assert {:error, %{kind: :bad_opts, message: "precision must be ns, us, ms, or s"}} =
+             TimeSeries.write_lines("Metric value=1", opts ++ [precision: :minute])
   end
 
   test "vector helpers validate setup and query arguments before network" do

@@ -34,7 +34,6 @@ defmodule Arex.Record do
   """
   def persist(record, opts \\ []) do
     with {:ok, resolved} <- Options.resolve(opts),
-         :ok <- reject_chunk_size(opts, "/api/v1/command/:db"),
          {:ok, attrs} <- Sql.normalize_map(record) do
       case attrs["@rid"] do
         nil -> insert_record(attrs, resolved)
@@ -53,12 +52,17 @@ defmodule Arex.Record do
     with true <-
            is_list(records) ||
              {:error, Error.bad_opts("records must be a list", %{method: nil, path: nil})},
-         {:ok, resolved} <- Options.resolve(opts),
-         :ok <- reject_chunk_size(opts, "/api/v1/command/:db"),
-         {:ok, {statements, returns}} <- batch_statements(records, resolved),
-         script when script != nil <- build_batch_script(statements, returns) do
-      with {:ok, %{records: rows}} <- Command.sqlscript(script, %{}, resolved) do
-        {:ok, parse_batch_rows(rows)}
+         {:ok, resolved} <- Options.resolve(opts) do
+      case records do
+        [] ->
+          {:ok, []}
+
+        _records ->
+          with {:ok, {statements, returns}} <- batch_statements(records, resolved),
+               script when script != nil <- build_batch_script(statements, returns),
+               {:ok, %{records: rows}} <- Command.sqlscript(script, %{}, resolved) do
+            {:ok, parse_batch_rows(rows)}
+          end
       end
     end
   end
@@ -201,9 +205,15 @@ defmodule Arex.Record do
     with {:ok, resolved} <- Options.resolve(opts),
          {:ok, rid} <- Sql.validate_rid(rid),
          {:ok, property} <- Sql.reject_protected_property(property),
-         {:ok, _current} <- fetch(rid, resolved),
-         {:ok, _result} <-
-           Command.sql("update #{rid} set #{property} = :value", %{"value" => value}, resolved) do
+         {:ok, current} <- fetch(rid, resolved),
+         {:ok, target} <- conditional_target(current, rid, resolved),
+         {:ok, result} <-
+           Command.sql(
+             "update #{target.type} set #{property} = :value where #{target.where}",
+             Map.put(target.params, "value", value),
+             resolved
+           ),
+         :ok <- ensure_mutated(result, resolved) do
       fetch(rid, resolved)
     end
   end
@@ -260,9 +270,15 @@ defmodule Arex.Record do
          {:ok, rid} <- Sql.validate_rid(rid),
          {:ok, normalized_attrs} <- Sql.normalize_map(attrs),
          {:ok, _attrs} <- Sql.reject_protected_attrs(normalized_attrs),
-         {:ok, _current} <- fetch(rid, resolved),
-         {:ok, _result} <-
-           Command.sql("update #{rid} merge #{Sql.json_map(normalized_attrs)}", %{}, resolved) do
+         {:ok, current} <- fetch(rid, resolved),
+         {:ok, target} <- conditional_target(current, rid, resolved),
+         {:ok, result} <-
+           Command.sql(
+             "update #{target.type} merge #{Sql.json_map(normalized_attrs)} where #{target.where}",
+             target.params,
+             resolved
+           ),
+         :ok <- ensure_mutated(result, resolved) do
       fetch(rid, resolved)
     end
   end
@@ -278,8 +294,14 @@ defmodule Arex.Record do
         normalized_attrs
         |> Sql.stamp_boundaries(%{tenant: current["tenant"], scope: current["scope"]})
 
-      with {:ok, _result} <-
-             Command.sql("update #{rid} content #{Sql.json_map(content)}", %{}, resolved) do
+      with {:ok, target} <- conditional_target(current, rid, resolved),
+           {:ok, result} <-
+             Command.sql(
+               "update #{target.type} content #{Sql.json_map(content)} where #{target.where}",
+               target.params,
+               resolved
+             ),
+           :ok <- ensure_mutated(result, resolved) do
         fetch(rid, resolved)
       end
     end
@@ -342,8 +364,15 @@ defmodule Arex.Record do
   def vaporize_by_id(rid, opts \\ []) do
     with {:ok, resolved} <- Options.resolve(opts),
          {:ok, rid} <- Sql.validate_rid(rid),
-         {:ok, _record} <- fetch(rid, resolved),
-         {:ok, _result} <- Command.sql("delete from #{rid}", %{}, resolved) do
+         {:ok, record} <- fetch(rid, resolved),
+         {:ok, target} <- conditional_target(record, rid, resolved),
+         {:ok, result} <-
+           Command.sql(
+             "delete from #{target.type} where #{target.where}",
+             target.params,
+             resolved
+           ),
+         :ok <- ensure_mutated(result, resolved) do
       {:ok, :deleted}
     end
   end
@@ -378,14 +407,16 @@ defmodule Arex.Record do
        Error.bad_opts("type is not allowed when updating by @rid", %{method: nil, path: nil})}
     else
       with {:ok, rid} <- Sql.validate_rid(rid),
-           {:ok, _current} <- fetch(rid, resolved),
+           {:ok, current} <- fetch(rid, resolved),
            update_attrs <- Sql.drop_system_and_boundary_keys(attrs),
-           {:ok, _result} <-
+           {:ok, target} <- conditional_target(current, rid, resolved),
+           {:ok, result} <-
              Command.sql(
-               "update #{rid} merge #{Sql.json_map(update_attrs)}",
-               %{},
+               "update #{target.type} merge #{Sql.json_map(update_attrs)} where #{target.where}",
+               target.params,
                resolved
-             ) do
+             ),
+           :ok <- ensure_mutated(result, resolved) do
         fetch(rid, resolved)
       end
     end
@@ -435,14 +466,15 @@ defmodule Arex.Record do
 
         rid ->
           with {:ok, rid} <- Sql.validate_rid(rid),
-               {:ok, _record} <- fetch(rid, resolved) do
+               {:ok, record} <- fetch(rid, resolved),
+               {:ok, target} <- conditional_target_inline(record, rid, resolved) do
             return_var = "item#{index}"
             content = Sql.drop_system_and_boundary_keys(attrs)
 
             {:ok,
              {[
-                "update #{rid} merge #{Sql.json_map(content)}",
-                "let #{return_var} = select from #{rid}"
+                "update #{target.type} merge #{Sql.json_map(content)} where #{target.where}",
+                "let #{return_var} = select from #{target.type} where #{target.where}"
               ], return_var}}
           end
       end
@@ -471,13 +503,76 @@ defmodule Arex.Record do
     end)
   end
 
-  defp reject_chunk_size(opts, path) do
-    if Keyword.has_key?(opts, :chunk_size) do
-      {:error, Error.bad_opts("chunk_size is not supported", %{method: :post, path: path})}
-    else
-      :ok
+  defp conditional_target(current, rid, resolved) do
+    with {:ok, type} <- current_record_type(current) do
+      {where, params} = conditional_where(rid, resolved)
+      {:ok, %{type: type, where: where, params: params}}
     end
   end
+
+  defp conditional_target_inline(current, rid, resolved) do
+    with {:ok, type} <- current_record_type(current) do
+      {:ok, %{type: type, where: conditional_where_inline(rid, resolved)}}
+    end
+  end
+
+  defp current_record_type(current) do
+    case type(current) do
+      nil -> {:error, Error.type_required(%{method: nil, path: nil})}
+      type -> Sql.validate_identifier(type)
+    end
+  end
+
+  defp conditional_where(rid, resolved) do
+    {clauses, params} =
+      {[], %{}}
+      |> maybe_add_boundary_param("tenant", resolved.tenant, "__arex_tenant")
+      |> maybe_add_boundary_param("scope", resolved.scope, "__arex_scope")
+
+    {"@rid = #{rid}" <> prepend_boundary_clauses(clauses), params}
+  end
+
+  defp maybe_add_boundary_param({clauses, params}, _field, nil, _param_name),
+    do: {clauses, params}
+
+  defp maybe_add_boundary_param({clauses, params}, field, value, param_name) do
+    {clauses ++ ["#{field} = :#{param_name}"], Map.put(params, param_name, value)}
+  end
+
+  defp conditional_where_inline(rid, resolved) do
+    clauses =
+      []
+      |> maybe_add_boundary_literal("tenant", resolved.tenant)
+      |> maybe_add_boundary_literal("scope", resolved.scope)
+
+    "@rid = #{rid}" <> prepend_boundary_clauses(clauses)
+  end
+
+  defp maybe_add_boundary_literal(clauses, _field, nil), do: clauses
+
+  defp maybe_add_boundary_literal(clauses, field, value) do
+    clauses ++ ["#{field} = #{sql_string_literal(value)}"]
+  end
+
+  defp prepend_boundary_clauses([]), do: ""
+  defp prepend_boundary_clauses(clauses), do: " and " <> Enum.join(clauses, " and ")
+
+  defp sql_string_literal(value) do
+    escaped =
+      value
+      |> to_string()
+      |> String.replace("\\", "\\\\")
+      |> String.replace("'", "\\'")
+
+    "'#{escaped}'"
+  end
+
+  defp ensure_mutated(%{count: 0}, resolved) do
+    {:error,
+     Error.not_found("record not found", request_meta(resolved, :post, "/api/v1/command/:db"))}
+  end
+
+  defp ensure_mutated(_result, _resolved), do: :ok
 
   defp request_meta(resolved, method, path) do
     %{method: method, path: String.replace(path, ":db", resolved.db || ":db")}

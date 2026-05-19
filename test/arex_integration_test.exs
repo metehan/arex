@@ -91,10 +91,7 @@ defmodule Arex.IntegrationTest do
            end)
   end
 
-  test "command helpers execute raw SQL and reject chunk_size", %{db: db} do
-    assert {:error, %{kind: :bad_opts}} =
-             Arex.Command.sql("select from Customer", %{}, db: db, chunk_size: 500)
-
+  test "command helpers execute raw SQL", %{db: db} do
     assert {:ok, %{records: rows}} =
              Arex.Command.sql(
                "select from schema:types where name = :name",

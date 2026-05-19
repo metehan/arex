@@ -45,8 +45,14 @@ defmodule Arex.Vector do
     {:group_size, "groupSize"}
   ]
 
-  @query_option_keys [
+  @dense_query_option_keys [
     {:ef_search, "efSearch"},
+    {:filter, "filter"},
+    {:group_by, "groupBy"},
+    {:group_size, "groupSize"}
+  ]
+
+  @sparse_query_option_keys [
     {:filter, "filter"},
     {:group_by, "groupBy"},
     {:group_size, "groupSize"}
@@ -110,7 +116,7 @@ defmodule Arex.Vector do
     with {:ok, index_ref} <- normalize_index(index),
          {:ok, query_vector} <- normalize_numeric_list(query_vector, :query_vector),
          {:ok, limit} <- validate_limit(limit),
-         {:ok, query_options} <- build_query_options(opts) do
+         {:ok, query_options} <- build_query_options(opts, @dense_query_option_keys) do
       Query.sql(
         "select expand(`vector.neighbors`(:index_ref, :query_vector, :limit#{query_options.placeholder_suffix}))",
         query_options.params
@@ -129,7 +135,7 @@ defmodule Arex.Vector do
          {:ok, query_weights} <- normalize_numeric_list(query_weights, :query_weights),
          :ok <- validate_sparse_lengths(query_indices, query_weights),
          {:ok, limit} <- validate_limit(limit),
-         {:ok, query_options} <- build_query_options(opts) do
+         {:ok, query_options} <- build_query_options(opts, @sparse_query_option_keys) do
       Query.sql(
         "select expand(`vector.sparseNeighbors`(:index_ref, :query_indices, :query_weights, :limit#{query_options.placeholder_suffix}))",
         query_options.params
@@ -211,11 +217,11 @@ defmodule Arex.Vector do
     {:ok, Jason.encode!(metadata)}
   end
 
-  defp build_query_options(opts) do
+  defp build_query_options(opts, allowed_options) do
     metadata =
       opts
       |> Enum.reduce(%{}, fn {key, value}, acc ->
-        case Enum.find(@query_option_keys, fn {candidate, _label} -> candidate == key end) do
+        case Enum.find(allowed_options, fn {candidate, _label} -> candidate == key end) do
           nil -> acc
           {_candidate, label} -> Map.put(acc, label, normalize_metadata_value(value))
         end

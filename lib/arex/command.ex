@@ -20,7 +20,6 @@ defmodule Arex.Command do
   If a write maps cleanly to a higher-level helper, prefer that helper first.
   """
 
-  alias Arex.Error
   alias Arex.Http
 
   @doc """
@@ -33,8 +32,7 @@ defmodule Arex.Command do
   rather than forcing `sql` or `sqlscript` explicitly.
   """
   def run(statement, params \\ %{}, opts \\ []) do
-    with :ok <- reject_chunk_size(opts),
-         {:ok, result} <- Http.command_raw(statement, params, opts) do
+    with {:ok, result} <- Http.command_raw(statement, params, opts) do
       {:ok, normalize_result(result)}
     end
   end
@@ -57,25 +55,6 @@ defmodule Arex.Command do
   """
   def sqlscript(statement, params \\ %{}, opts \\ []) do
     run(statement, params, put_language(opts, "sqlscript"))
-  end
-
-  defp reject_chunk_size(opts) do
-    has_chunk_size? =
-      cond do
-        is_list(opts) -> Keyword.has_key?(opts, :chunk_size)
-        is_map(opts) -> Map.has_key?(opts, :chunk_size)
-        true -> false
-      end
-
-    if has_chunk_size? do
-      {:error,
-       Error.bad_opts(
-         "chunk_size is not supported on raw command helpers",
-         %{method: :post, path: "/api/v1/command/:db"}
-       )}
-    else
-      :ok
-    end
   end
 
   defp normalize_result(result) do
