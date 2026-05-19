@@ -66,7 +66,6 @@ defmodule Arex.MixProject do
         "docs/records_and_queries.md",
         "docs/graph_and_schema.md",
         "docs/runtime_behavior.md",
-        "docs/production_readiness.md",
         "docs/arex/skill.md"
       ],
       groups_for_extras: [
@@ -78,7 +77,7 @@ defmodule Arex.MixProject do
           "docs/runtime_behavior.md",
           "docs/arex/skill.md"
         ],
-        Operations: ["CHANGELOG.md", "docs/production_readiness.md"]
+        Operations: ["CHANGELOG.md"]
       ],
       groups_for_modules: [
         Core: [Arex, Arex.Query, Arex.Command, Arex.Record, Arex.KV, Arex.TimeSeries, Arex.Vector],

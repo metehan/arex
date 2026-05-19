@@ -27,7 +27,6 @@ It is built around a small set of promises:
 - [Records and Queries](docs/records_and_queries.md) explains CRUD helpers, paging, batching, upserts, and when to drop to raw SQL.
 - [Graph and Schema](docs/graph_and_schema.md) documents provisioning, schema changes, graph helpers, and traversal patterns.
 - [Runtime Behavior](docs/runtime_behavior.md) explains option resolution, retries, timeouts, normalized errors, and observability expectations.
-- [Production Readiness](docs/production_readiness.md) is the release and rollout checklist.
 - [AI Skill Guide](docs/arex/skill.md) summarizes safe usage rules for automation and agent workflows.
 
 ## Installation
@@ -441,5 +440,4 @@ mix test --cover
 - [Records and Queries](docs/records_and_queries.md)
 - [Graph and Schema](docs/graph_and_schema.md)
 - [Runtime Behavior](docs/runtime_behavior.md)
-- [Production Readiness](docs/production_readiness.md)
 - [CHANGELOG.md](CHANGELOG.md)
