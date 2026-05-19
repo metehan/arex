@@ -8,13 +8,21 @@ defmodule Arex.Options do
   2. application config for `:arex`
   3. environment variables for `url`, `user`, `pwd`, and `db`
 
-  `language` is intentionally not env-backed. It comes from call options or
+  `language` is not env-backed. It comes from call options or
   application config and otherwise defaults to `"sql"`.
 
   The resolved output is the internal options map used throughout Arex. This
   module validates boundary rules, normalizes string-like values, sanitizes
   transport options, and ensures callers cannot bypass retry policy through
   nested Req configuration.
+
+  `Arex.Options` is public mainly for transparency and extension work. Typical
+  application code should pass ordinary keyword lists to the public helpers and
+  let those helpers resolve options internally.
+
+  Use this module directly only when you are extending Arex or building wrapper
+  layers that need to mirror the library's exact precedence and validation
+  rules.
   """
 
   alias Arex.Error

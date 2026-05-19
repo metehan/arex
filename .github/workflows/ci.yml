@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MIX_ENV: test
-      AREX_URL: http://127.0.0.1:2480
-      AREX_USER: root
-      AREX_PWD: playwithdata
-      AREX_DB: Imported
+      AREX_URL: http://127.0.0.1:2480/
+      AREX_USER: test_user
+      AREX_PWD: test_password
+      AREX_DB: test_db
     services:
       arcadedb:
         image: arcadedata/arcadedb:latest
@@ -23,8 +23,8 @@ jobs:
           - 2424:2424
         env:
           JAVA_OPTS: >-
-            -Darcadedb.server.rootPassword=playwithdata
-            -Darcadedb.server.defaultDatabases=Imported[root]{import:https://github.com/ArcadeData/arcadedb-datasets/raw/main/orientdb/OpenBeer.gz}
+            -Darcadedb.server.rootPassword=root_password
+            -Darcadedb.server.defaultDatabases=test_db[test_user:test_password]
     steps:
       - uses: actions/checkout@v4
 

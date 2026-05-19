@@ -2,41 +2,71 @@ defmodule Arex.IntegrationTest do
   use Arex.IntegrationCase, async: false
 
   setup_all do
-    db = unique_name("arex_test_db")
-
-    {:ok, :created} = Arex.Database.create(db)
-    {:ok, _} = Arex.Schema.create_document_type("Customer", db: db)
-    {:ok, _} = Arex.Schema.create_property("Customer", "external_id", :string, db: db)
-    {:ok, _} = Arex.Schema.create_index("Customer", ["external_id"], db: db, unique: true)
-    {:ok, _} = Arex.Schema.create_vertex_type("Person", db: db)
-    {:ok, _} = Arex.Schema.create_edge_type("Knows", db: db)
-
-    on_exit(fn ->
-      _ = Arex.Database.drop(db)
-    end)
+    db = base_db()
+    :ok = ensure_base_schema(db)
 
     %{db: db}
   end
 
-  test "server info, query, paging, and streaming work against Imported" do
+  test "server info, query, paging, and streaming work against a provisioned test database", %{
+    db: db
+  } do
+    prefix = unique_name("stream")
+    stream_1 = "#{prefix}_1"
+    stream_2 = "#{prefix}_2"
+    stream_3 = "#{prefix}_3"
+
     assert {:ok, :pong} = Arex.ping()
     assert {:ok, info} = Arex.server_info()
     assert is_binary(info["serverName"])
     assert is_binary(info["version"])
 
     assert {:ok, dbs} = Arex.Database.list()
-    assert "Imported" in dbs
-    assert {:ok, true} = Arex.Database.exists?("Imported")
+    assert db in dbs
+    assert {:ok, true} = Arex.Database.exists?(db)
 
-    assert {:ok, [beer]} =
-             Arex.Query.sql("select from Beer where id = :id", %{"id" => 1}, db: "Imported")
+    assert {:ok, _alice} =
+             Arex.Record.persist(
+               %{external_id: stream_1, name: "Alice"},
+               db: db,
+               type: "Customer",
+               tenant: "ankara",
+               scope: "crm"
+             )
 
-    assert beer["@type"] == "Beer"
-    assert beer["name"] == "Hocus Pocus"
+    assert {:ok, _bob} =
+             Arex.Record.persist(
+               %{external_id: stream_2, name: "Bob"},
+               db: db,
+               type: "Customer",
+               tenant: "ankara",
+               scope: "crm"
+             )
+
+    assert {:ok, _carol} =
+             Arex.Record.persist(
+               %{external_id: stream_3, name: "Carol"},
+               db: db,
+               type: "Customer",
+               tenant: "ankara",
+               scope: "crm"
+             )
+
+    assert {:ok, [customer]} =
+             Arex.Query.sql(
+               "select from Customer where external_id = :external_id",
+               %{"external_id" => stream_1},
+               db: db
+             )
+
+    assert customer["@type"] == "Customer"
+    assert customer["name"] == "Alice"
 
     assert {:ok, page} =
-             Arex.Query.page("select from Beer order by id", %{},
-               db: "Imported",
+             Arex.Query.page(
+               "select from Customer where external_id like :prefix order by external_id",
+               %{"prefix" => "#{prefix}%"},
+               db: db,
                limit: 2,
                offset: 0
              )
@@ -46,8 +76,10 @@ defmodule Arex.IntegrationTest do
     assert page.has_more?
 
     assert {:ok, stream} =
-             Arex.Query.stream_pages("select from Beer order by id", %{},
-               db: "Imported",
+             Arex.Query.stream_pages(
+               "select from Customer where external_id like :prefix order by external_id",
+               %{"prefix" => "#{prefix}%"},
+               db: db,
                limit: 2
              )
 
@@ -88,9 +120,13 @@ defmodule Arex.IntegrationTest do
   end
 
   test "record helpers round-trip data and enforce boundaries", %{db: db} do
+    customer_name = unique_name("alice")
+    updated_name = unique_name("alice_updated")
+    upsert_external_id = unique_name("cust")
+
     assert {:ok, customer} =
              Arex.Record.persist(
-               %{name: "Alice"},
+               %{name: customer_name},
                db: db,
                type: "Customer",
                tenant: "ankara",
@@ -104,7 +140,7 @@ defmodule Arex.IntegrationTest do
     assert {:ok, same_customer} =
              Arex.Record.fetch(rid, db: db, tenant: "ankara", scope: "crm")
 
-    assert same_customer["name"] == "Alice"
+    assert same_customer["name"] == customer_name
 
     assert {:ok, [fetched, nil]} =
              Arex.Record.fetch_multi(
@@ -118,7 +154,7 @@ defmodule Arex.IntegrationTest do
 
     assert {:ok, customer_from_get} =
              Arex.Record.get_one(
-               %{name: "Alice"},
+               %{name: customer_name},
                db: db,
                type: "Customer",
                tenant: "ankara",
@@ -129,7 +165,7 @@ defmodule Arex.IntegrationTest do
 
     assert {:ok, true} =
              Arex.Record.is_there?(
-               %{name: "Alice"},
+               %{name: customer_name},
                db: db,
                type: "Customer",
                tenant: "ankara",
@@ -144,13 +180,13 @@ defmodule Arex.IntegrationTest do
     assert {:ok, replaced} =
              Arex.Record.replace(
                rid,
-               %{name: "Alice Updated"},
+               %{name: updated_name},
                db: db,
                tenant: "ankara",
                scope: "crm"
              )
 
-    assert replaced["name"] == "Alice Updated"
+    assert replaced["name"] == updated_name
     refute Map.has_key?(replaced, "city")
 
     assert {:ok, upserted_1} =
@@ -158,19 +194,19 @@ defmodule Arex.IntegrationTest do
                "Customer",
                %{name: "Bob"},
                db: db,
-               where: %{external_id: "cust-1"},
+               where: %{external_id: upsert_external_id},
                tenant: "ankara",
                scope: "crm"
              )
 
-    assert upserted_1["external_id"] == "cust-1"
+    assert upserted_1["external_id"] == upsert_external_id
 
     assert {:ok, upserted_2} =
              Arex.Record.upsert(
                "Customer",
                %{name: "Bob Updated"},
                db: db,
-               where: %{external_id: "cust-1"},
+               where: %{external_id: upsert_external_id},
                tenant: "ankara",
                scope: "crm"
              )
@@ -188,25 +224,30 @@ defmodule Arex.IntegrationTest do
   end
 
   test "persist_multi is atomic", %{db: db} do
+    batch_prefix = unique_name("batch")
+    batch_a = "#{batch_prefix}_a"
+    batch_b = "#{batch_prefix}_b"
+    batch_c = "#{batch_prefix}_c"
+
     assert {:ok, [one, two]} =
              Arex.Record.persist_multi(
                [
-                 %{"@type" => "Customer", "external_id" => "batch-a", "name" => "A"},
-                 %{"@type" => "Customer", "external_id" => "batch-b", "name" => "B"}
+                 %{"@type" => "Customer", "external_id" => batch_a, "name" => "A"},
+                 %{"@type" => "Customer", "external_id" => batch_b, "name" => "B"}
                ],
                db: db,
                tenant: "ankara",
                scope: "crm"
              )
 
-    assert one["external_id"] == "batch-a"
-    assert two["external_id"] == "batch-b"
+    assert one["external_id"] == batch_a
+    assert two["external_id"] == batch_b
 
     assert {:error, _error} =
              Arex.Record.persist_multi(
                [
-                 %{"@type" => "Customer", "external_id" => "batch-c", "name" => "C"},
-                 %{"@type" => "Customer", "external_id" => "batch-c", "name" => "D"}
+                 %{"@type" => "Customer", "external_id" => batch_c, "name" => "C"},
+                 %{"@type" => "Customer", "external_id" => batch_c, "name" => "D"}
                ],
                db: db,
                tenant: "ankara",
@@ -215,7 +256,7 @@ defmodule Arex.IntegrationTest do
 
     assert {:ok, false} =
              Arex.Record.is_there?(
-               %{external_id: "batch-c"},
+               %{external_id: batch_c},
                db: db,
                type: "Customer",
                tenant: "ankara",

@@ -5,6 +5,15 @@ defmodule Arex.Schema do
   `Arex.Schema` keeps common ArcadeDB schema operations close to the underlying
   SQL commands while normalizing return values for missing resources. Use it to
   inspect types, create or drop schema elements, and provision buckets.
+
+  The module aims to sit in the middle ground between raw SQL and a large DSL:
+
+  - identifiers are validated before commands are sent
+  - common missing-resource cases come back as `{:ok, :missing}`
+  - the public API stays close to ArcadeDB terminology
+
+  That makes it suitable for migrations, application bootstrapping, and test
+  setup without forcing callers to build schema SQL by hand.
   """
 
   alias Arex.Command

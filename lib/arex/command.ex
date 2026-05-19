@@ -9,6 +9,15 @@ defmodule Arex.Command do
   Results are normalized to `%{count: ..., records: ...}` so application code
   can handle common command shapes consistently even when ArcadeDB returns
   slightly different response bodies.
+
+  Use `Arex.Command` when you want explicit write statements and still want:
+
+  - Arex option resolution
+  - normalized error tuples
+  - stable result normalization
+  - explicit control over SQL versus SQLScript
+
+  If a write maps cleanly to a higher-level helper, prefer that helper first.
   """
 
   alias Arex.Error

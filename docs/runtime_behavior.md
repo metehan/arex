@@ -101,10 +101,17 @@ Boundary rules are runtime behavior, not just convenience syntax.
 
 - insert-like helpers stamp `tenant` and `scope` into stored content
 - boundary-aware reads filter by `tenant` and `scope`
+- `Arex.KV` applies boundary namespaces on wrapped key helpers such as `get/2`, `set/3`, and `exists?/2`
+- `Arex.TimeSeries` stamps `tenant` and `scope` into boundary-aware writes and filters wrapped SQL/latest reads through those tags
 - RID-based reads and writes still enforce boundary visibility
 - crossing a boundary is treated as `:not_found`
 
 That behavior is what lets Arex provide safe multi-tenant helpers without exposing cross-boundary existence through helper APIs.
+
+Raw escape hatches stay raw:
+
+- `Arex.KV.run/2` and `Arex.KV.batch/2` do not rewrite arbitrary Redis command strings
+- hand-written TimeSeries SQL, PromQL, JSON payloads, or remote-read/write payloads are still caller-controlled unless a wrapper explicitly adds boundary tags or filters
 
 ## Transport Details
 
@@ -131,7 +138,7 @@ Recommended practice:
 
 ## ArcadeDB-Specific Behavior
 
-Arex intentionally documents the ArcadeDB behavior it relies on:
+Arex documents the ArcadeDB behavior it relies on explicitly:
 
 - pagination uses `skip` and `limit`, not raw `offset`, in generated SQL
 - non-unique index creation requires explicit `notunique`

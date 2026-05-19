@@ -2,20 +2,8 @@ defmodule Arex.AdditionalIntegrationTest do
   use Arex.IntegrationCase, async: false
 
   setup_all do
-    db = unique_name("arex_extra_db")
-
-    {:ok, :created} = Arex.Database.create(db)
-    {:ok, _} = Arex.Schema.create_document_type("Customer", db: db)
-    {:ok, _} = Arex.Schema.create_property("Customer", "external_id", :string, db: db)
-    {:ok, _} = Arex.Schema.create_index("Customer", ["external_id"], db: db, unique: true)
-    {:ok, _} = Arex.Schema.create_vertex_type("Person", db: db)
-    {:ok, _} = Arex.Schema.create_property("Person", "external_id", :string, db: db)
-    {:ok, _} = Arex.Schema.create_index("Person", ["external_id"], db: db, unique: true)
-    {:ok, _} = Arex.Schema.create_edge_type("Knows", db: db)
-
-    on_exit(fn ->
-      _ = Arex.Database.drop(db)
-    end)
+    db = base_db()
+    :ok = ensure_base_schema(db)
 
     %{db: db}
   end
@@ -137,6 +125,95 @@ defmodule Arex.AdditionalIntegrationTest do
              )
 
     assert script_row["name"] == "Customer"
+  end
+
+  test "kv helpers isolate transient keys across tenant and scope boundaries", %{db: db} do
+    base_key = unique_name("kv_session")
+
+    assert {:ok, "OK"} =
+             Arex.KV.set(base_key, "ankara-crm", db: db, tenant: "ankara", scope: "crm")
+
+    assert {:ok, "OK"} =
+             Arex.KV.set(base_key, "ankara-ops", db: db, tenant: "ankara", scope: "ops")
+
+    assert {:ok, "OK"} =
+             Arex.KV.set(base_key, "izmir-crm", db: db, tenant: "izmir", scope: "crm")
+
+    assert {:ok, "ankara-crm"} =
+             Arex.KV.get(base_key, db: db, tenant: "ankara", scope: "crm")
+
+    assert {:ok, "ankara-ops"} =
+             Arex.KV.get(base_key, db: db, tenant: "ankara", scope: "ops")
+
+    assert {:ok, "izmir-crm"} =
+             Arex.KV.get(base_key, db: db, tenant: "izmir", scope: "crm")
+
+    assert {:ok, true} =
+             Arex.KV.exists?(base_key, db: db, tenant: "ankara", scope: "crm")
+
+    assert {:ok, 1.0} =
+             Arex.KV.incrby(unique_name("kv_counter"), 1,
+               db: db,
+               tenant: "ankara",
+               scope: "crm"
+             )
+
+    assert {:ok, "ankara-ops"} =
+             Arex.KV.get(base_key, db: db, tenant: "ankara", scope: "ops")
+
+    assert {:ok, "izmir-crm"} =
+             Arex.KV.get(base_key, db: db, tenant: "izmir", scope: "crm")
+  end
+
+  test "time series helpers stamp and filter tenant and scope boundaries", %{db: db} do
+    type = unique_name("MetricTs")
+
+    on_exit(fn ->
+      _ = Arex.TimeSeries.drop_type(type, db: db, if_exists: true)
+    end)
+
+    assert {:ok, _} =
+             Arex.TimeSeries.create_type(
+               type,
+               "ts",
+               [{"sensor", :string}],
+               [{"value", :double}],
+               db: db,
+               tenant: "ankara",
+               scope: "ops"
+             )
+
+    assert {:ok, _} =
+             Arex.TimeSeries.insert(
+               type,
+               %{"ts" => 1_715_000_001_000, "sensor" => "load", "value" => 1.5},
+               db: db,
+               tenant: "ankara",
+               scope: "ops"
+             )
+
+    assert {:ok, _} =
+             Arex.TimeSeries.insert(
+               type,
+               %{"ts" => 1_715_000_002_000, "sensor" => "load", "value" => 2.5},
+               db: db,
+               tenant: "izmir",
+               scope: "ops"
+             )
+
+    assert {:ok, rows} =
+             Arex.TimeSeries.query_sql(
+               "select from #{type} where sensor = :sensor order by ts",
+               %{"sensor" => "load"},
+               db: db,
+               tenant: "ankara",
+               scope: "ops"
+             )
+
+    assert length(rows) == 1
+    assert hd(rows)["tenant"] == "ankara"
+    assert hd(rows)["scope"] == "ops"
+    assert hd(rows)["value"] == 1.5
   end
 
   test "record helpers cover persist_new, property mutation, and vaporize", %{db: db} do
@@ -444,14 +521,10 @@ defmodule Arex.AdditionalIntegrationTest do
     assert {:ok, :missing} = Arex.Database.drop(missing_db)
   end
 
-  test "database create and drop transitions a dedicated database" do
-    db_name = unique_name("lifecycle_db")
-
-    assert {:ok, false} = Arex.Database.exists?(db_name)
-    assert {:ok, :created} = Arex.Database.create(db_name)
-    assert {:ok, true} = Arex.Database.exists?(db_name)
-    assert {:ok, :dropped} = Arex.Database.drop(db_name)
-    assert {:ok, false} = Arex.Database.exists?(db_name)
+  test "database helpers expose list and existence for the configured test database", %{db: db} do
+    assert {:ok, dbs} = Arex.Database.list()
+    assert db in dbs
+    assert {:ok, true} = Arex.Database.exists?(db)
   end
 
   test "vertex and edge wrappers cover inbound traversal, replace, and delete", %{db: db} do

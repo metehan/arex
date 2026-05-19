@@ -248,3 +248,8 @@ Drop to `Arex.Query` or `Arex.Command` when you need:
 - [Getting Started](getting_started.md)
 - [Graph and Schema](graph_and_schema.md)
 - [Runtime Behavior](runtime_behavior.md)
+
+ This guide stays focused on document-style CRUD and raw query/command
+helpers. For boundary-aware key/value and time-series workflows, see
+[README.md](../README.md) and [Getting Started](getting_started.md), then use
+`Arex.KV` and `Arex.TimeSeries` directly.

@@ -9,6 +9,16 @@ defmodule Arex.Record do
   Input maps may use atom or string keys for ordinary fields. The module keeps
   common CRUD workflows, boundary enforcement, and RID-based operations out of
   handwritten SQL so application code can stay focused on domain logic.
+
+  Reach for `Arex.Record` when you want:
+
+  - inserts and updates decided from record shape
+  - `where:`-based upserts
+  - boundary-aware reads and deletes
+  - batch persistence in one SQLScript transaction
+
+  This is the module that most application code should start with before
+  dropping to raw `Arex.Query` or `Arex.Command`.
   """
 
   alias Arex.Command

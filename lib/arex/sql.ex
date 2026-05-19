@@ -6,6 +6,16 @@ defmodule Arex.Sql do
   `Arex.Schema`, and the graph helpers. `Arex.Sql` is useful when extending
   Arex or building custom wrappers on top of the same validation and boundary
   rules.
+
+  This module is where Arex centralizes reusable SQL-oriented behavior such as:
+
+  - identifier and RID validation
+  - boundary stamping for inserts
+  - boundary-aware filter construction
+  - protection of system-managed or boundary-managed fields
+
+  Keeping those rules here lets higher-level modules stay small while still
+  sharing one consistent definition of tenant/scope behavior.
   """
 
   alias Arex.Error

@@ -8,6 +8,10 @@ defmodule Arex.Edge do
   Use this module when your relationship data is naturally represented as
   ArcadeDB edges and you want Arex to validate vertex visibility, stamp active
   boundaries, and normalize RID-oriented operations.
+
+  `Arex.Edge` complements `Arex.Vertex` rather than replacing it. Use the two
+  together when you want explicit graph workflows with the same boundary model
+  that Arex applies to document helpers.
   """
 
   alias Arex.Command

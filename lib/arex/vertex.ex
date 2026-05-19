@@ -10,6 +10,10 @@ defmodule Arex.Vertex do
   still wants the same ergonomics as `Arex.Record`: validated identifiers,
   normalized errors, boundary stamping on writes, and boundary filtering on
   reads and traversals.
+
+  In practice this module is a thin, focused graph layer over the record and
+  query primitives. It exists so graph code can stay as concise and explicit as
+  document code without losing the tenant/scope model.
   """
 
   alias Arex.Command

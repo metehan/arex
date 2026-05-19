@@ -8,6 +8,10 @@ defmodule Arex.Database do
 
   Reach for this module when you need to create or drop databases, check server
   visibility, or collect a compact type summary for a target database.
+
+  This module stays narrow on purpose. It does not try to expose every
+  server-level administrative operation, only the ones that are common in test
+  setup, local development, and operational checks.
   """
 
   alias Arex.Http

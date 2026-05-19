@@ -1,16 +1,22 @@
 defmodule Arex do
   @moduledoc """
-  Public entry points for connectivity checks and server metadata.
+  Small top-level entry points for server reachability and metadata.
 
-  `Arex` itself is intentionally small. Most application code will spend its
-  time in `Arex.Record`, `Arex.Query`, `Arex.Command`, `Arex.Schema`,
-  `Arex.Vertex`, and `Arex.Edge`, while this module provides a minimal
-  server-level surface for health checks and diagnostics.
+  `Arex` keeps the root module minimal. It does not expose a
+  public client struct or a connection process. Instead, the library is
+  organized into focused modules such as `Arex.Record`, `Arex.Query`,
+  `Arex.Command`, `Arex.Schema`, `Arex.KV`, `Arex.TimeSeries`, `Arex.Vertex`,
+  and `Arex.Edge`.
 
-  Use this module when you need to confirm that the configured ArcadeDB server
-  is reachable or when you want raw server metadata such as version details.
-  The return contract matches the rest of the library: `{:ok, value}` on
-  success and `{:error, error_map}` on failure.
+  Use this module when you need:
+
+  - a lightweight startup or readiness check
+  - server metadata such as version and server name
+  - a simple top-level health probe without choosing a model-specific module
+
+  Like the rest of Arex, these helpers return normalized `{:ok, value}` and
+  `{:error, error_map}` tuples so application code can treat connectivity
+  checks the same way it treats ordinary data access.
   """
 
   alias Arex.Http

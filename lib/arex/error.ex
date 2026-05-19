@@ -6,9 +6,21 @@ defmodule Arex.Error do
   suitable for pattern matching and the remaining fields preserve debugging
   context from the originating request.
 
-  The goal of this module is stability at the API boundary: callers should be
-  able to branch on `error.kind` while still having access to the original HTTP
-  request metadata and any ArcadeDB-specific details that were available.
+  The goal of this module is stability at the API boundary. Callers should be
+  able to branch on `error.kind` without parsing raw response payloads, while
+  still having access to the request metadata and any ArcadeDB-specific detail
+  that was available.
+
+  In practice this means:
+
+  - transport errors and ArcadeDB errors share one shape
+  - `kind` is the main field for pattern matching in application code
+  - request metadata stays attached for observability and debugging
+  - helper-level validation failures look the same as remote failures
+
+  Most application code will not call these constructors directly, but the
+  module is public so consumers can rely on the documented error shape and the
+  stable `kind` vocabulary.
   """
 
   @typedoc "Metadata about the request that produced the error."

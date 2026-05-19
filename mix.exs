@@ -36,7 +36,7 @@ defmodule Arex.MixProject do
   end
 
   defp description do
-    "ArcadeDB-native Elixir client with tenant and scope aware record, query, schema, and graph helpers."
+    "ArcadeDB-native Elixir client with tenant/scope-aware record, graph, KV, TimeSeries, and vector helpers."
   end
 
   defp package do
@@ -81,7 +81,7 @@ defmodule Arex.MixProject do
         Operations: ["CHANGELOG.md", "docs/production_readiness.md"]
       ],
       groups_for_modules: [
-        Core: [Arex, Arex.Query, Arex.Command, Arex.Record],
+        Core: [Arex, Arex.Query, Arex.Command, Arex.Record, Arex.KV, Arex.TimeSeries, Arex.Vector],
         Graph: [Arex.Vertex, Arex.Edge],
         Schema: [Arex.Schema, Arex.Database],
         Support: [Arex.Error, Arex.Options, Arex.Http, Arex.Sql]

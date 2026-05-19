@@ -12,6 +12,8 @@ Use this guide when an AI agent needs to work with Arex in application code.
 Arex is an ArcadeDB-native Elixir client that wraps the HTTP API with higher-level helpers for:
 
 - querying and raw commands
+- key/value and time-series access
+- vector search and embedding index helpers
 - tenant and scope aware records
 - schema and database operations
 - graph traversal and edge creation
@@ -38,6 +40,9 @@ Arex is an ArcadeDB-native Elixir client that wraps the HTTP API with higher-lev
 - `Arex`: ping and server info.
 - `Arex.Query`: read-oriented helpers such as `sql/3`, `first/3`, `one/3`, `page/3`, and `stream_pages/3`.
 - `Arex.Command`: raw command helpers such as `sql/3` and `sqlscript/3`.
+- `Arex.KV`: Redis-language key/value and persistent hash helpers over HTTP.
+- `Arex.TimeSeries`: TimeSeries DDL, SQL access, line protocol, JSON query, PromQL, and Grafana endpoint helpers.
+- `Arex.Vector`: vector property setup, dense and sparse index creation, nearest-neighbor queries, and hybrid fusion helpers.
 - `Arex.Record`: CRUD helpers with boundary stamping and filtering.
 - `Arex.Schema` and `Arex.Database`: administrative helpers.
 - `Arex.Vertex` and `Arex.Edge`: graph helpers built on top of `Arex.Record`, `Arex.Query`, and `Arex.Command`.
@@ -45,8 +50,13 @@ Arex is an ArcadeDB-native Elixir client that wraps the HTTP API with higher-lev
 ## Usage Conventions
 
 - Prefer `Arex.Query.sql/3` and `Arex.Command.sql/3` unless you explicitly need a non-SQL language.
+- Prefer `Arex.KV` over hand-built Redis command strings for common key/value flows.
+- Prefer `Arex.TimeSeries` for TimeSeries DDL and dedicated endpoint usage instead of hand-building `/ts` paths.
+- Prefer `Arex.Vector` for `LSM_VECTOR`, `LSM_SPARSE_VECTOR`, and `vector.*` SQL wrappers instead of hand-building metadata JSON.
 - Use `Arex.Record` for document-style reads and writes instead of building raw statements for common CRUD paths.
 - Use `tenant` and `scope` consistently on both reads and writes when the application model is boundary-aware.
+- Prefer wrapped `Arex.KV` helpers over `run/2` when you want tenant/scope key isolation.
+- Prefer wrapped `Arex.TimeSeries` insert and query helpers over raw SQL or raw line protocol when you want tenant/scope tags enforced automatically.
 - Do not try to mutate `tenant`, `scope`, `@rid`, `@type`, `@in`, or `@out` through helper APIs that explicitly protect those fields.
 - Use `persist_multi/2` when you need one transaction across many record changes.
 
@@ -61,12 +71,15 @@ Arex is an ArcadeDB-native Elixir client that wraps the HTTP API with higher-lev
 - Dropping bracketed index names such as `Customer[field]` requires backtick quoting.
 - SQLScript scalar responses come back through the HTTP API as result rows such as `%{"value" => 5}`.
 - Write helpers reject `retry:` and Arex strips retry-related keys from `req_options`.
+- `Arex.Http.request/4` is the low-level escape hatch for authenticated non-standard ArcadeDB endpoints.
+- Wrapped `Arex.KV` key helpers namespace keys by active `tenant` and `scope`, but `run/2` and `batch/2` are still raw.
+- Wrapped `Arex.TimeSeries` writes stamp `tenant` and `scope` tags, and wrapped SQL/latest reads apply those boundaries when present.
 
 ## Operational Rules
 
 - Arex does not emit its own Telemetry events or logs; instrument call sites at the application boundary.
 - Log normalized error maps instead of raw payload guesses, but redact credentials and auth headers.
-- For local verification or CI, start `arcadedata/arcadedb` with the `Imported` sample database so query and integration tests have stable fixtures.
+- For local verification or CI, start `arcadedata/arcadedb` with an empty `test_db` database provisioned as `test_db[test_user:test_password]`; integration tests must run without relying on sample imports or root-only database creation.
 
 ## Example
 

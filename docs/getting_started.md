@@ -2,7 +2,7 @@
 
 This guide takes you from a running ArcadeDB server to your first successful reads and writes with Arex.
 
-Arex is intentionally small. You do not create a public client struct or open a session object in normal usage. Instead, you call module functions and pass options when you need to override defaults.
+Arex stays small by design. You do not create a public client struct or open a session object in normal usage. Instead, you call module functions and pass options when you need to override defaults.
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@ You need:
 - credentials for that server
 - a target database, or permission to create one
 
-If you want a predictable local environment, the Docker command in [README.md](../README.md) starts ArcadeDB with the `Imported` sample database.
+If you want a predictable local environment, the Docker command in [README.md](../README.md) starts ArcadeDB with an empty `test_db` database and test credentials.
 
 ## Install The Library
 
@@ -76,22 +76,25 @@ If you need to target a specific server without changing app config, pass connec
 
 ```elixir
 Arex.ping(
-  url: "http://localhost:2480",
-  user: "root",
-  pwd: "playwithdata"
+  url: "http://localhost:2480/",
+  user: "test_user",
+  pwd: "test_password"
 )
 ```
 
 ## Read Existing Data
 
-When a database already contains data, `Arex.Query` is the fastest way to get started:
+When a database already contains data, `Arex.Query` is the fastest way to get started. With the empty local test database, create a type first and then query it:
 
 ```elixir
+{:ok, _} = Arex.Schema.create_document_type("Beer", db: "test_db")
+{:ok, _} = Arex.Record.persist(%{id: 1, name: "Hocus Pocus"}, db: "test_db", type: "Beer")
+
 {:ok, rows} =
   Arex.Query.sql(
     "select from Beer where id = :id",
     %{"id" => 1},
-    db: "Imported"
+    db: "test_db"
   )
 ```
 
@@ -169,16 +172,103 @@ This is one of Arex's main advantages over scattering raw SQL through applicatio
 
 ## Pick The Right Module
 
-| Module          | Start here when you need                 |
-| --------------- | ---------------------------------------- |
-| `Arex`          | connectivity checks and server metadata  |
-| `Arex.Query`    | raw reads and paging                     |
-| `Arex.Command`  | raw write commands or SQLScript          |
-| `Arex.Record`   | document-style CRUD                      |
-| `Arex.Schema`   | types, properties, indexes, and buckets  |
-| `Arex.Database` | create, drop, list, or inspect databases |
-| `Arex.Vertex`   | graph vertex creation and traversal      |
-| `Arex.Edge`     | graph edge creation and lookup           |
+| Module            | Start here when you need                 |
+| ----------------- | ---------------------------------------- |
+| `Arex`            | connectivity checks and server metadata  |
+| `Arex.Query`      | raw reads and paging                     |
+| `Arex.Command`    | raw write commands or SQLScript          |
+| `Arex.Record`     | document-style CRUD                      |
+| `Arex.Schema`     | types, properties, indexes, and buckets  |
+| `Arex.Database`   | create, drop, list, or inspect databases |
+| `Arex.KV`         | Redis-style key/value and hash commands  |
+| `Arex.TimeSeries` | TimeSeries DDL and endpoint wrappers     |
+| `Arex.Vector`     | vector properties, indexes, and search   |
+| `Arex.Vertex`     | graph vertex creation and traversal      |
+| `Arex.Edge`       | graph edge creation and lookup           |
+
+## Specialized Models
+
+Once the basic record flow is clear, the specialized modules follow the same
+core Arex rules: option resolution, normalized `{:ok, value}` and
+`{:error, error_map}` tuples, and explicit control over when you drop to raw
+statements or raw HTTP.
+
+### Key/Value
+
+`Arex.KV` wraps ArcadeDB's Redis-language command surface with boundary-aware
+key helpers.
+
+```elixir
+{:ok, "OK"} =
+  Arex.KV.set(
+    "session:ada",
+    "online",
+    db: "crm",
+    tenant: "ankara",
+    scope: "sales"
+  )
+
+{:ok, "online"} =
+  Arex.KV.get(
+    "session:ada",
+    db: "crm",
+    tenant: "ankara",
+    scope: "sales"
+  )
+```
+
+Important behavior:
+
+- wrapped key helpers namespace keys by `tenant` and `scope`
+- raw `run/2` and `batch/2` stay caller-controlled
+- `scope` still requires `tenant`
+
+### Time-Series
+
+`Arex.TimeSeries` covers type creation, helper-managed inserts, and dedicated
+TimeSeries endpoints.
+
+```elixir
+{:ok, _} =
+  Arex.TimeSeries.create_type(
+    "CpuMetric",
+    "ts",
+    [{"host", :string}],
+    [{"value", :double}],
+    db: "metrics",
+    tenant: "ankara",
+    scope: "ops"
+  )
+
+{:ok, _} =
+  Arex.TimeSeries.insert(
+    "CpuMetric",
+    %{"ts" => 1_715_000_001_000, "host" => "app-1", "value" => 0.42},
+    db: "metrics",
+    tenant: "ankara",
+    scope: "ops"
+  )
+```
+
+Important behavior:
+
+- helper-managed writes stamp `tenant` and `scope` as tags when present
+- wrapped SQL and latest-point reads apply those tags automatically
+- raw SQL, raw PromQL, and raw payload helpers stay available when you need full control
+
+### Vector Search
+
+`Arex.Vector` is the convenience layer for ArcadeDB vector properties, indexes,
+and nearest-neighbor queries.
+
+```elixir
+{:ok, _} = Arex.Schema.create_document_type("Doc", db: "search")
+{:ok, _} = Arex.Vector.create_embedding_property("Doc", "embedding", db: "search")
+{:ok, _} = Arex.Vector.create_dense_index("Doc", "embedding", 768, db: "search")
+```
+
+This module keeps the public API close to ArcadeDB's vector features while
+avoiding repetitive metadata JSON and index SQL.
 
 ## What To Read Next
 

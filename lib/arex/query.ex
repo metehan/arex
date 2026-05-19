@@ -8,6 +8,10 @@ defmodule Arex.Query do
 
   Use `sql/3` for ordinary ArcadeDB SQL queries and `run/3` when you want the
   query language to come from call options or application config.
+
+  `Arex.Query` is statement-oriented. It does not infer record
+  types or append tenant and scope predicates automatically. If you want
+  type-aware or boundary-aware CRUD semantics, prefer `Arex.Record`.
   """
 
   alias Arex.Error

@@ -6,11 +6,14 @@ defmodule Arex.UnitTest do
   alias Arex.Edge
   alias Arex.Error
   alias Arex.Http
+  alias Arex.KV
   alias Arex.Options
   alias Arex.Query
   alias Arex.Record
   alias Arex.Schema
   alias Arex.Sql
+  alias Arex.TimeSeries
+  alias Arex.Vector
   alias Arex.Vertex
 
   setup do
@@ -106,7 +109,7 @@ defmodule Arex.UnitTest do
 
   test "options resolve merges config and env values and sanitizes request options" do
     Application.put_env(:arex, :url, "http://config.example")
-    Application.put_env(:arex, :user, :root)
+    Application.put_env(:arex, :user, :test_user)
     Application.put_env(:arex, :pwd, :secret)
     Application.put_env(:arex, :db, :config_db)
     Application.put_env(:arex, :language, "sqlscript")
@@ -126,7 +129,7 @@ defmodule Arex.UnitTest do
              )
 
     assert resolved.url == "http://config.example"
-    assert resolved.user == "root"
+    assert resolved.user == "test_user"
     assert resolved.pwd == "secret"
     assert resolved.db == "call_db"
     assert resolved.language == "sqlscript"
@@ -143,7 +146,7 @@ defmodule Arex.UnitTest do
 
   test "options default language to sql when call opts and config omit it" do
     Application.put_env(:arex, :url, "http://config.example")
-    Application.put_env(:arex, :user, :root)
+    Application.put_env(:arex, :user, :test_user)
     Application.put_env(:arex, :pwd, :secret)
     Application.put_env(:arex, :db, :config_db)
 
@@ -268,15 +271,15 @@ defmodule Arex.UnitTest do
 
   test "http and wrapper validations fail before network when inputs are bad" do
     assert {:error, %{kind: :bad_opts, details: %{missing: missing}}} =
-             Http.server_info(user: "root", pwd: "playwithdata")
+             Http.server_info(user: "test_user", pwd: "test_password")
 
     assert :url in missing
 
     assert {:error, %{kind: :database_required}} =
              Http.query_raw("select 1", %{},
                url: "http://localhost:2480",
-               user: "root",
-               pwd: "playwithdata"
+               user: "test_user",
+               pwd: "test_password"
              )
 
     assert {:error, %{kind: :bad_opts, message: "retry is not allowed for write helpers"}} =
@@ -284,8 +287,8 @@ defmodule Arex.UnitTest do
                "delete from Customer",
                %{},
                url: "http://localhost:2480",
-               user: "root",
-               pwd: "playwithdata",
+               user: "test_user",
+               pwd: "test_password",
                db: "demo",
                retry: [max: 1, backoff_ms: 0]
              )
@@ -293,8 +296,8 @@ defmodule Arex.UnitTest do
     assert {:error, %{kind: :bad_opts, message: "retry is not allowed for write helpers"}} =
              Http.server_command("create database demo",
                url: "http://localhost:2480",
-               user: "root",
-               pwd: "playwithdata",
+               user: "test_user",
+               pwd: "test_password",
                retry: [max: 1, backoff_ms: 0]
              )
 
@@ -371,6 +374,108 @@ defmodule Arex.UnitTest do
     assert Edge.in_rid(:bad) == nil
   end
 
+  test "generic http request validates arbitrary endpoint options before network" do
+    opts = fake_connection_opts()
+
+    assert {:error, %{kind: :bad_opts, message: "path must start with /"}} =
+             Http.request(:get, "api/v1/server", nil, opts)
+
+    assert {:error, %{kind: :bad_opts, message: "query must be a map or keyword list"}} =
+             Http.request(:get, "/api/v1/server", nil, opts ++ [query: :bad])
+
+    assert {:error, %{kind: :bad_opts, message: "request_headers must be a map or keyword list"}} =
+             Http.request(:get, "/api/v1/server", nil, opts ++ [request_headers: :bad])
+
+    assert {:error, %{kind: :bad_opts, message: "response must be :decoded or :raw"}} =
+             Http.request(:get, "/api/v1/server", nil, opts ++ [response: :stream])
+  end
+
+  test "kv helpers unwrap values and reject invalid inputs before network" do
+    assert {:ok, "PONG"} = KV.value({:ok, %{records: [%{"value" => "PONG"}]}})
+    assert {:ok, nil} = KV.value({:ok, %{records: []}})
+    assert {:ok, [%{"other" => true}]} = KV.value({:ok, %{records: [%{"other" => true}]}})
+
+    assert {:error, %{kind: :scope_without_tenant}} =
+             KV.get("session", scope: "crm")
+
+    assert {:error, %{kind: :bad_opts, message: "commands must be a list of strings"}} =
+             KV.batch(["PING", 123], fake_connection_opts())
+
+    assert {:error, %{kind: :bad_opts, message: "keys must be a non-empty list"}} =
+             KV.delete([], fake_connection_opts())
+
+    assert {:error, %{kind: :bad_opts, message: "keys must be a non-empty list"}} =
+             KV.hmget("Account[id]", [], fake_connection_opts())
+  end
+
+  test "time series helpers validate ddl and endpoint arguments before network" do
+    opts = fake_connection_opts()
+
+    assert {:error, %{kind: :scope_without_tenant}} =
+             TimeSeries.insert("Metric", %{"ts" => 1, "value" => 1.0}, scope: "ops")
+
+    assert {:error, %{kind: :invalid_identifier}} =
+             TimeSeries.create_type("bad-name", "ts", [], [{"value", :double}], opts)
+
+    assert {:error, %{kind: :bad_opts, message: "fields must be a non-empty list"}} =
+             TimeSeries.create_type("Metric", "ts", [], [], opts)
+
+    assert {:error, %{kind: :bad_opts, message: "rows must be a non-empty list"}} =
+             TimeSeries.insert_many("Metric", [], opts)
+
+    assert {:error, %{kind: :bad_opts, message: "payload must be a map"}} =
+             TimeSeries.query_json(:bad, opts)
+
+    assert {:error, %{kind: :bad_opts, message: "expression must be a non-empty string"}} =
+             TimeSeries.promql("", opts)
+
+    assert {:error, %{kind: :bad_opts, message: "start, end, and step are required"}} =
+             TimeSeries.promql_range("up", opts)
+
+    assert {:error, %{kind: :bad_opts, message: "payload must be a binary"}} =
+             TimeSeries.prom_remote_write(%{}, opts)
+
+    assert {:error, %{kind: :bad_opts, message: "payload must be a binary"}} =
+             TimeSeries.prom_remote_read(%{}, opts)
+
+    assert {:error, %{kind: :bad_opts, message: "lines must be a string or list of strings"}} =
+             TimeSeries.write_lines(123, opts)
+  end
+
+  test "vector helpers validate setup and query arguments before network" do
+    opts = fake_connection_opts()
+
+    assert {:ok, "Doc[embedding]"} = Vector.index_ref("Doc", "embedding")
+    assert {:error, %{kind: :invalid_identifier}} = Vector.index_ref("bad-name", "embedding")
+
+    assert {:error, %{kind: :bad_opts, message: "encoding must be :float32 or :int8"}} =
+             Vector.create_embedding_property("Doc", "embedding", opts ++ [encoding: :bad])
+
+    assert {:error, %{kind: :bad_opts, message: "dimensions must be a valid integer"}} =
+             Vector.create_dense_index("Doc", "embedding", 0, opts)
+
+    assert {:error, %{kind: :bad_opts, message: "dimensions must be a valid integer"}} =
+             Vector.create_sparse_index("Doc", "tokens", "weights", opts ++ [dimensions: -1])
+
+    assert {:error,
+            %{kind: :bad_opts, message: "query_vector must be a non-empty list of numbers"}} =
+             Vector.neighbors("Doc[embedding]", [], 10, opts)
+
+    assert {:error, %{kind: :bad_opts, message: "limit must be a positive integer"}} =
+             Vector.neighbors("Doc[embedding]", [0.1, 0.2], 0, opts)
+
+    assert {:error,
+            %{
+              kind: :bad_opts,
+              message: "query_indices and query_weights must have the same length"
+            }} =
+             Vector.sparse_neighbors("Doc[tokens,weights]", [1, 2], [0.5], 10, opts)
+
+    assert {:error,
+            %{kind: :bad_opts, message: "source_queries must contain at least two SQL fragments"}} =
+             Vector.fuse(["`vector.neighbors`('Doc[embedding]', [0.1], 10)"], opts)
+  end
+
   defp clear_arex_env do
     Enum.each(Application.get_all_env(:arex), fn {key, _value} ->
       Application.delete_env(:arex, key)
@@ -378,6 +483,6 @@ defmodule Arex.UnitTest do
   end
 
   defp fake_connection_opts do
-    [url: "http://localhost:2480", user: "root", pwd: "playwithdata", db: "demo"]
+    [url: "http://localhost:2480/", user: "test_user", pwd: "test_password", db: "demo"]
   end
 end
