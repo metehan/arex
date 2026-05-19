@@ -24,7 +24,6 @@ Arex is an ArcadeDB-native Elixir client that wraps the HTTP API with higher-lev
 - `../records_and_queries.md` for CRUD helpers, paging, batching, and upserts.
 - `../graph_and_schema.md` for provisioning, schema changes, and graph usage.
 - `../runtime_behavior.md` for retries, timeouts, normalized errors, and observability.
-- `../production_readiness.md` for release and rollout checks.
 
 ## Configuration Rules
 
@@ -108,8 +107,3 @@ Arex is an ArcadeDB-native Elixir client that wraps the HTTP API with higher-lev
 
 - Use `Arex.Http` only when you need raw request/response control.
 - Use `Arex.Sql` and `Arex.Options` only for internal extensions or library work, not typical application code.
-
-## Production Readiness
-
-- Before recommending Arex for production rollout or a Hex release, review `../production_readiness.md`.
-- Treat the checklist as the release gate for package metadata, docs quality, testing, compatibility, operational hardening, and release workflow.

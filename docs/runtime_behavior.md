@@ -146,7 +146,3 @@ Arex documents the ArcadeDB behavior it relies on explicitly:
 - SQLScript scalar results come back as rows such as `%{"value" => 5}`
 
 These are not theoretical notes. They are behaviors observed against the live HTTP API and encoded into helper behavior.
-
-## Production Notes
-
-For release and rollout checks, use [production_readiness.md](production_readiness.md) alongside this guide.
