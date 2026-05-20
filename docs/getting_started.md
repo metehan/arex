@@ -21,7 +21,7 @@ Add Arex to your dependency list:
 ```elixir
 defp deps do
   [
-    {:arex, "~> 0.1.0"}
+    {:arex, "~> 0.1.1"}
   ]
 end
 ```

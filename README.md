@@ -36,7 +36,7 @@ Add Arex to your dependencies:
 ```elixir
 defp deps do
   [
-    {:arex, "~> 0.1.0"}
+    {:arex, "~> 0.1.1"}
   ]
 end
 ```
