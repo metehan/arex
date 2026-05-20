@@ -60,8 +60,8 @@ defmodule Arex.Record do
         _records ->
           with {:ok, {statements, returns}} <- batch_statements(records, resolved),
                script when script != nil <- build_batch_script(statements, returns),
-               {:ok, %{records: rows}} <- Command.sqlscript(script, %{}, resolved) do
-            {:ok, parse_batch_rows(rows)}
+               {:ok, records} <- execute_batch_script(script, resolved) do
+            {:ok, records}
           end
       end
     end
@@ -438,15 +438,31 @@ defmodule Arex.Record do
   defp batch_statements(records, resolved) do
     records
     |> Enum.with_index()
-    |> Enum.reduce_while({:ok, {[], []}}, fn {record, index}, {:ok, {statements, returns}} ->
+    |> Enum.reduce_while({:ok, {[], []}}, fn {record, index}, {:ok, {items, returns}} ->
       case build_batch_item(record, index, resolved) do
-        {:ok, {item_statements, return_var}} ->
-          {:cont, {:ok, {statements ++ item_statements, returns ++ [return_var]}}}
+        {:ok, item} ->
+          {:cont, {:ok, {items ++ [item], returns ++ [item.return_var]}}}
 
         {:error, error} ->
           {:halt, {:error, error}}
       end
     end)
+    |> case do
+      {:ok, {items, returns}} ->
+        # Updates run first so stale RIDs cannot be reused by earlier inserts in the same batch.
+        statements =
+          [:update, :insert]
+          |> Enum.flat_map(fn kind ->
+            items
+            |> Enum.filter(&(&1.kind == kind))
+            |> Enum.flat_map(& &1.statements)
+          end)
+
+        {:ok, {statements, returns}}
+
+      {:error, error} ->
+        {:error, error}
+    end
   end
 
   defp build_batch_item(record, index, resolved) do
@@ -459,9 +475,13 @@ defmodule Arex.Record do
             content = Sql.content_from_insert_attrs(attrs, resolved)
 
             {:ok,
-             {[
-                "let #{return_var} = insert into #{type} content #{Sql.json_map(content)}"
-              ], return_var}}
+             %{
+               kind: :insert,
+               return_var: return_var,
+               statements: [
+                 "let #{return_var} = insert into #{type} content #{Sql.json_map(content)}"
+               ]
+             }}
           end
 
         rid ->
@@ -472,10 +492,15 @@ defmodule Arex.Record do
             content = Sql.drop_system_and_boundary_keys(attrs)
 
             {:ok,
-             {[
-                "update #{target.type} merge #{Sql.json_map(content)} where #{target.where}",
-                "let #{return_var} = select from #{target.type} where #{target.where}"
-              ], return_var}}
+             %{
+               kind: :update,
+               return_var: return_var,
+               statements: [
+                 "update #{target.type} merge #{Sql.json_map(content)} where #{target.where}",
+                 "let #{return_var} = select from #{target.type} where #{target.where}",
+                 "if ($#{return_var}.size() = 0) { rollback; return #{batch_not_found_marker(index)} }"
+               ]
+             }}
           end
       end
     end
@@ -494,12 +519,59 @@ defmodule Arex.Record do
     |> Kernel.<>(";")
   end
 
-  defp parse_batch_rows(rows) do
-    Enum.map(rows, fn
-      %{"value" => [record | _]} -> record
-      %{"value" => record} when is_map(record) -> record
-      [record | _] -> record
-      record -> record
+  defp execute_batch_script(script, resolved) do
+    case Command.sqlscript(script, %{}, resolved) do
+      {:ok, %{records: rows}} -> parse_batch_rows(rows, resolved)
+      {:error, %{kind: :arcadedb} = error} -> normalize_batch_arcadedb_error(error, resolved)
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp parse_batch_rows(rows, resolved) do
+    case batch_error(rows) do
+      nil ->
+        {:ok,
+         Enum.map(rows, fn
+           %{"value" => [record | _]} -> record
+           %{"value" => record} when is_map(record) -> record
+           [record | _] -> record
+           record -> record
+         end)}
+
+      {:not_found, index} ->
+        {:error,
+         Error.not_found(
+           "record not found",
+           request_meta(resolved, :post, "/api/v1/command/:db"),
+           %{index: index}
+         )}
+    end
+  end
+
+  defp batch_error([%{"value" => %{"__arex_error" => "not_found"} = marker} | _rows]) do
+    {:not_found, marker["__arex_index"]}
+  end
+
+  defp batch_error(_rows), do: nil
+
+  defp normalize_batch_arcadedb_error(error, resolved) do
+    if arcadedb_not_found?(error) do
+      {:error,
+       Error.not_found(
+         "record not found",
+         request_meta(resolved, :post, "/api/v1/command/:db"),
+         %{details: error.details}
+       )}
+    else
+      {:error, error}
+    end
+  end
+
+  defp arcadedb_not_found?(%{message: message, details: details}) do
+    [message, details]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.any?(fn text ->
+      String.contains?(text, "not found") or String.contains?(text, "Bucket with id")
     end)
   end
 
@@ -546,6 +618,10 @@ defmodule Arex.Record do
       |> maybe_add_boundary_literal("scope", resolved.scope)
 
     "@rid = #{rid}" <> prepend_boundary_clauses(clauses)
+  end
+
+  defp batch_not_found_marker(index) do
+    Jason.encode!(%{"__arex_error" => "not_found", "__arex_index" => index})
   end
 
   defp maybe_add_boundary_literal(clauses, _field, nil), do: clauses

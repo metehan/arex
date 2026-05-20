@@ -19,7 +19,7 @@ defmodule Arex.IntegrationCase do
   end
 
   def unique_name(prefix) do
-    "#{prefix}_#{System.unique_integer([:positive])}"
+    "#{prefix}_#{System.system_time(:nanosecond)}_#{System.unique_integer([:positive])}"
   end
 
   def base_db do

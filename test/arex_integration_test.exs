@@ -261,6 +261,92 @@ defmodule Arex.IntegrationTest do
              )
   end
 
+  test "persist_multi rolls back when a later update cannot run", %{db: db} do
+    boundary_insert = unique_name("batch_boundary_insert")
+
+    assert {:ok, boundary_record} =
+             Arex.Record.persist(
+               %{
+                 external_id: unique_name("batch_boundary_existing"),
+                 name: "Boundary Existing"
+               },
+               db: db,
+               type: "Customer",
+               tenant: "izmir",
+               scope: "crm"
+             )
+
+    assert {:error, %{kind: :not_found}} =
+             Arex.Record.persist_multi(
+               [
+                 %{"@type" => "Customer", "external_id" => boundary_insert, "name" => "Rollback"},
+                 %{"@rid" => boundary_record["@rid"], "name" => "Should Not Update"}
+               ],
+               db: db,
+               tenant: "ankara",
+               scope: "crm"
+             )
+
+    assert {:ok, false} =
+             Arex.Record.is_there?(
+               %{external_id: boundary_insert},
+               db: db,
+               type: "Customer",
+               tenant: "ankara",
+               scope: "crm"
+             )
+
+    assert {:ok, untouched} =
+             Arex.Record.fetch(boundary_record["@rid"],
+               db: db,
+               tenant: "izmir",
+               scope: "crm"
+             )
+
+    assert untouched["name"] == "Boundary Existing"
+
+    deleted_insert = unique_name("batch_deleted_insert")
+
+    assert {:ok, deleted_record} =
+             Arex.Record.persist(
+               %{
+                 external_id: unique_name("batch_deleted_existing"),
+                 name: "Deleted Existing"
+               },
+               db: db,
+               type: "Customer",
+               tenant: "ankara",
+               scope: "crm"
+             )
+
+    assert {:ok, :deleted} =
+             Arex.Record.vaporize_by_id(deleted_record["@rid"],
+               db: db,
+               tenant: "ankara",
+               scope: "crm"
+             )
+
+    assert {:error, %{kind: :not_found}} =
+             Arex.Record.persist_multi(
+               [
+                 %{"@type" => "Customer", "external_id" => deleted_insert, "name" => "Rollback"},
+                 %{"@rid" => deleted_record["@rid"], "name" => "Should Not Update"}
+               ],
+               db: db,
+               tenant: "ankara",
+               scope: "crm"
+             )
+
+    assert {:ok, false} =
+             Arex.Record.is_there?(
+               %{external_id: deleted_insert},
+               db: db,
+               type: "Customer",
+               tenant: "ankara",
+               scope: "crm"
+             )
+  end
+
   test "vertex and edge helpers work", %{db: db} do
     assert {:ok, alice} =
              Arex.Vertex.create(
